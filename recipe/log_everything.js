@@ -25,6 +25,8 @@
 // of the authors and should not be interpreted as representing official policies, 
 // either expressed or implied, of the FreeBSD Project.
 
+// ----------------------------------------------------------------------------
+// Pushes javascript objects to server by POSTING JSON version of the object.
 function JSONToServerPusher() {
     this.url = 'http://onxlog.appspot.com/';
 }
@@ -47,6 +49,8 @@ JSONToServerPusher.prototype.onError = function (textStatus, response) {
 	console.error('upload_via_ajax error: ', error);
 };
 
+// ----------------------------------------------------------------------------
+// Manages an associative array of SignalStacks.
 function StackManager() {
     this.data = {};
 	this.stacks = {};
@@ -69,6 +73,8 @@ StackManager.prototype.clearData = function() {
 	}
 };
 
+// ----------------------------------------------------------------------------
+// A stack to store signals fired by On{X}.
 function SignalStack(data_array) {
     console.info('Created SignalStack');
 	this._signal_array = data_array;
@@ -80,6 +86,8 @@ SignalStack.prototype.push = function(signal) {
 	this._signal_array.push(parsed);
 };
 
+// Parses signals into associative arrays or lists, so that they
+// can later be JSON stringified.
 SignalStack.prototype._parse_signal = function(signal) {
     var parsed = {};
     parsed.signalType = signal.signalType;
@@ -150,7 +158,12 @@ SignalStack.prototype._parse_signal = function(signal) {
 	return parsed;
 };
 
+// ----------------------------------------------------------------------------
+// MAIN ENTRYPOINT 
+// ----------------------------------------------------------------------------
 var stack_manager = new StackManager();
+
+// Collect all the signals that can be fired by On{X}.
 var screen_events = stack_manager.getStack('screen');
 device.screen.on('unlock', function(signal) { screen_events.push(signal); });
 device.screen.on('on', function(signal) { screen_events.push(signal); });
@@ -180,29 +193,40 @@ device.telephony.on('outgoingCall', function(signal) { telephony_events.push(sig
 
 var location_events = stack_manager.getStack('location');
 
+// Actively request for cell-tower-based location updates every 5 minutes.
 var location_cell_listener = device.location.createListener('CELL', 300*1000);
 location_cell_listener.on('changed', function(signal) { location_events.push(signal); });
 
+// Naturally, we can also make use of passive updates, set to 30 seconds since
+// we don't care about second-to-second precision.
 var location_pass_listener = device.location.createListener('PASSIVE', 30*1000);
 location_pass_listener.on('changed', function(signal) { location_events.push(signal); });
 
+
+// Actively request for cell-tower-based location updates every 5 minutes.
 var remote_events = new JSONToServerPusher();
 function upload_data() {
     var data = stack_manager.getData();
+	
+	// The current implementation discards any data collected between
+	// making the ajax call and calling onSuccess. That's OK for now.
 	remote_events.push(data, function() { stack_manager.clearData(); });
 }
 
+// Schedule a upload of everything that's collected every 10 minutes.
 device.scheduler.setTimer({
-    name: "upload_all_series_timer", 
+    name: "upload_data_timer", 
     time: 0,
     interval: 600*1000, 
-    exact: true },
+    exact: false },
     upload_data
     );
 
+// A persistent notification that reminds us the script is still
+// running. Also clicking on it triggers an immediate upload.
 function persistent_notification() {
     var notification = device.notifications.createNotification("onxlog");
-    notification.content = JSON.stringify(stack_manager.getData());
+    notification.content = 'Click to upload data immediately.'
     notification.on('click',function() {
         upload_data();
 		persistent_notification();
@@ -210,5 +234,4 @@ function persistent_notification() {
     });
     notification.show();
 }
-
 persistent_notification();
